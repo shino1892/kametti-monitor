@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@sopia-bot/core':
-        specifier: file:../spoon/packages/core
-        version: file:../spoon/packages/core
+        specifier: file:./sopia-core
+        version: file:sopia-core
       axios:
         specifier: ^1.13.5
         version: 1.13.5
@@ -262,8 +262,8 @@ packages:
     resolution: {integrity: sha512-jjmJywLAFoWeBi1W7994zZyiNWPIiqRRNAmSERxyg93xRGzNYvGjlZ0gR6x0F4gPRi2+0O6S71kOZYyr3cxaIQ==}
     engines: {node: '>=v14.0.0', npm: '>=7.0.0'}
 
-  '@sopia-bot/core@file:../spoon/packages/core':
-    resolution: {directory: ../spoon/packages/core, type: directory}
+  '@sopia-bot/core@file:sopia-core':
+    resolution: {directory: sopia-core, type: directory}
 
   '@types/body-parser@1.19.6':
     resolution: {integrity: sha512-HLFeCYgz89uk22N5Qg3dvGvsv46B8GLvKKo1zKG4NybA8U2DiEO3w9lqGg29t/tfLRJpJ6iQxnVw4OnB7MoM9g==}
@@ -926,7 +926,7 @@ snapshots:
 
   '@sapphire/snowflake@3.5.3': {}
 
-  '@sopia-bot/core@file:../spoon/packages/core':
+  '@sopia-bot/core@file:sopia-core':
     dependencies:
       '@types/ws': 8.18.1
       class-transformer: 0.5.1
