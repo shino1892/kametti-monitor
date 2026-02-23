@@ -1,0 +1,7 @@
+# デフォルトでテキストファイルは自動判定し、コミット時はLFに統一する
+* text=auto
+
+# 明示的にLFを指定したいファイル（特にLXCで動かすもの）
+*.ts text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
