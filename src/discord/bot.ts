@@ -1,22 +1,20 @@
 import "dotenv/config";
-import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, ChatInputCommandInteraction, Events, TextChannel } from "discord.js";
+import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Events, ChatInputCommandInteraction } from "discord.js";
 import { spoonClient, pendingLiveId, setNotifyHandler, main as startApp } from "../app";
 import { EventName } from "../spoon/events";
 import kuromoji from "kuromoji";
 
+// --- 設定の読み込み ---
 const TARGET_USER_IDS = (process.env.TARGET_IDS || "").split(",").map((id) => id.trim());
+const CHAT_CHANNEL_ID = process.env.DISCORD_CHAT_CHANNEL_ID;
+const MAIN_CHANNEL_ID = process.env.DISCORD_MAIN_CHANNEL_ID;
 
-// --- ダジャレ判定・形態素解析の準備 ---
+// --- ダジャレ判定・形態素解析の準備 (Shareka) ---
 let tokenizer: kuromoji.Tokenizer<kuromoji.IpadicFeatures> | null = null;
-
-// Kuromojiの初期化（辞書の読み込み）
 kuromoji.builder({ dicPath: "node_modules/kuromoji/dict" }).build((err, _tokenizer) => {
-  if (err) {
-    console.error("❌ Kuromoji初期化エラー:", err);
-    return;
-  }
+  if (err) return console.error("❌ Kuromoji初期化エラー:", err);
   tokenizer = _tokenizer;
-  console.log("✅ Kuromoji (形態素解析) の準備が完了しました。");
+  console.log("✅ Kuromoji (形態素解析) 準備完了");
 });
 
 class Shareka {
@@ -124,11 +122,13 @@ class Shareka {
   }
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+// --- Discord Client の初期化 ---
+// ✅ 重要: GuildMessages と MessageContent を追加して発言を読み取れるようにする
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+});
 
-// Discordへの送信関数を定義
-const sendDiscordMessage = async (content: string) => {
-  const channelId = process.env.DISCORD_CHANNEL_ID;
+const sendDiscordMessage = async (content: string, channelId = MAIN_CHANNEL_ID) => {
   if (!channelId) return;
   try {
     const channel = await client.channels.fetch(channelId);
@@ -140,9 +140,9 @@ const sendDiscordMessage = async (content: string) => {
   }
 };
 
-// app.ts に通知関数を登録
 setNotifyHandler(sendDiscordMessage);
 
+// --- スラッシュコマンド登録 ---
 async function registerCommands() {
   const appId = process.env.DISCORD_APP_ID!;
   const guildId = process.env.DISCORD_GUILD_ID!;
@@ -155,68 +155,51 @@ async function registerCommands() {
 client.once(Events.ClientReady, async () => {
   console.log(`🤖 Bot Ready: ${client.user?.tag}`);
   await registerCommands();
-  // Botの準備ができたら app.ts のメインロジックを開始
   await startApp();
 });
 
+// --- インタラクション (コマンド) 処理 ---
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  // src/discord/bot.ts の該当箇所を差し替え
   if (interaction.commandName === "join") {
     if (!pendingLiveId || !spoonClient) {
-      return interaction.reply({ content: "❌ 現在検知されている配信がないか、Spoonクライアントが準備できていません。", ephemeral: true });
+      return interaction.reply({ content: "❌ 配信が検知されていないか、準備中です。", ephemeral: true });
     }
-
     await interaction.deferReply();
 
     try {
       const live = spoonClient.live;
-
-      // 二重登録を避けるため既存のリスナーを解除
       live.removeAllListeners("event:all");
 
-      // コメント受信のログ出力をリポジトリの collector.ts 仕様に合わせる
       live.on("event:all", async (eventName, payload) => {
         if (eventName === EventName.CHAT_MESSAGE) {
-          // payload から nickname を安全に取得するロジック
-          const gen = payload.generator || payload.author || payload.user || payload;
+          const gen = (payload as any).generator || (payload as any).author || (payload as any).user || payload;
           const userId = gen?.id?.toString();
           const nickname = gen?.nickname || "不明なユーザー";
-          const message = payload.message || "";
+          const message = (payload as any).message || "";
 
-          // 1. 特定のユーザーかチェック
-          if (true || TARGET_USER_IDS.includes(userId)) {
-            // 2. ダジャレかどうかを判定（ここでは例として全て転送するか、判定を挟む）
+          // 自分の発言（ループ防止）
+          const myId = (spoonClient as any).logonUser?.id?.toString();
+          if (userId === myId) return;
+
+          // A. 指定チャンネルに全コメント転送
+          await sendDiscordMessage(`💬 **${nickname}**: ${message}`, CHAT_CHANNEL_ID);
+
+          // B. 特定ユーザー（または全員）のダジャレ判定
+          if (TARGET_USER_IDS.includes(userId)) {
             const checker = new Shareka(message, 2);
             if (checker.dajarewake()) {
-              console.log(`✨ ダジャレ検知: [${nickname}]: ${message}`);
-
-              // 3. Discordに送信
-              const channelId = process.env.DISCORD_CHANNEL_ID;
-              const channel = await client.channels.fetch(channelId!);
-              if (channel?.isTextBased()) {
-                await (channel as any).send(`🤣 **ダジャレ検知！**\n👤 **${nickname}**: ${message}`);
-              }
+              await sendDiscordMessage(`🤣 **ダジャレ検知！**\n👤 **${nickname}**: ${message}`, MAIN_CHANNEL_ID);
             }
           }
-
-          console.log(`💬 [Chat] ${nickname}: ${message}`);
         }
       });
 
-      console.log(`⏳ LiveID: ${pendingLiveId} に参加を試みています...`);
-
-      // ライブに参加
       await live.join(pendingLiveId);
-
-      await interaction.editReply(`✅ LiveID: ${pendingLiveId} に参加しました！コンソールにコメントが表示されます。`);
+      await interaction.editReply(`✅ LiveID: ${pendingLiveId} に参加しました！`);
     } catch (e: any) {
-      console.error("❌ /join 実行エラー:", e);
-
-      // Discord側にもエラー詳細を表示
-      const errorMsg = e.message || "不明なエラー";
-      await interaction.editReply(`❌ 参加に失敗しました: \`${errorMsg}\` (LiveID: ${pendingLiveId})`);
+      await interaction.editReply(`❌ 参加エラー: ${e.message}`);
     }
   }
 
@@ -225,6 +208,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await spoonClient.live.close();
       await interaction.reply("👋 退室しました");
     }
+  }
+});
+
+// --- 双方向チャット: Discord -> Spoon ---
+client.on(Events.MessageCreate, async (message) => {
+  // Bot自身の発言、またはチャット用チャンネル以外は無視
+  if (message.author.bot || message.channelId !== CHAT_CHANNEL_ID) return;
+
+  if (spoonClient && spoonClient.live) {
+    try {
+      await spoonClient.live.message(message.content);
+      await message.react("✅");
+    } catch (e: any) {
+      console.error("❌ Spoonへのチャット送信失敗:", e);
+      await message.react("❌");
+    }
+  } else {
+    // 参加していない場合、リアクションで通知
+    await message.react("⚠️");
   }
 });
 
