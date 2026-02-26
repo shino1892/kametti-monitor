@@ -129,19 +129,27 @@ async function detectLoop(client: SpoonV2) {
     const status = e?.status_code || e?.error?.status_code;
     const message = String(e?.message || "");
 
-    // 460エラー（トークン失効）時のバックオフ処理
+    // 1. トークン失効 (460)
     if (status === 460) {
       tokenRefreshBackoffUntil = Date.now() + TOKEN_REFRESH_BACKOFF_MS;
       console.log(`🔄 トークン失効。${TOKEN_REFRESH_BACKOFF_MS / 1000}秒待機します。`);
       return;
     }
 
-    // HTMLが返る等の異常応答時のバックオフ処理
+    // 2. ネットワークエラー (fetch failed / timeout) への対応を追加
+    if (message.includes("fetch failed") || e.code === "UND_ERR_CONNECT_TIMEOUT") {
+      tokenRefreshBackoffUntil = Date.now() + SPOON_HTTP_ANOMALY_BACKOFF_MS;
+      console.log(`🌐 ネットワーク接続エラー。一時的に${SPOON_HTTP_ANOMALY_BACKOFF_MS / 1000}秒待機します。`);
+      return;
+    }
+
+    // 3. HTMLが返る等の異常応答
     if (message.includes("Unexpected token") || message.toLowerCase().includes("<html")) {
       tokenRefreshBackoffUntil = Date.now() + SPOON_HTTP_ANOMALY_BACKOFF_MS;
       console.log(`⚠️ Spoon API異常。${SPOON_HTTP_ANOMALY_BACKOFF_MS / 1000}秒待機します。`);
       return;
     }
+
     console.warn("⚠️ detectLoop error:", e.message);
   }
 }
