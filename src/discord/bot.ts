@@ -4,7 +4,7 @@ import { spoonClient, pendingLiveId, setNotifyHandler, main as startApp } from "
 import { EventName } from "../spoon/events";
 import kuromoji from "kuromoji";
 
-const TARGET_USER_IDS = [process.env.SHIERU];
+const TARGET_USER_IDS = (process.env.TARGET_IDS || "").split(",").map((id) => id.trim());
 
 // --- ダジャレ判定・形態素解析の準備 ---
 let tokenizer: kuromoji.Tokenizer<kuromoji.IpadicFeatures> | null = null;
@@ -186,7 +186,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const message = payload.message || "";
 
           // 1. 特定のユーザーかチェック
-          if (TARGET_USER_IDS.includes(userId)) {
+          if (true || TARGET_USER_IDS.includes(userId)) {
             // 2. ダジャレかどうかを判定（ここでは例として全て転送するか、判定を挟む）
             const checker = new Shareka(message, 2);
             if (checker.dajarewake()) {
