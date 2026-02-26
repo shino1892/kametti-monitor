@@ -7,14 +7,20 @@ Spoon の特定DJ配信を監視し、配信検知を Discord に通知しつつ
 
 - Node.js（推奨: LTS）
 - pnpm
-- `@sopia-bot/core` をローカル参照しています（`package.json` の `file:../spoon/packages/core`）
-  - このリポジトリと同階層に `../spoon` が存在する構成を想定しています
-  - その構成でない場合は、依存関係の参照先を調整してください
+- `@sopia-bot/core` をリポジトリ内の `sopia-core` として同梱しています（`package.json` の `file:./sopia-core`）
+  - `@sopia-bot/core` は `dist/` を公開物として使うため、初回セットアップ時に `sopia-core` のビルドが必要です（後述）
 
 ## セットアップ
 
 ```bash
 pnpm install
+```
+
+`@sopia-bot/core`（`sopia-core`）のビルド（初回/更新時）:
+
+```bash
+pnpm -C sopia-core install
+pnpm -C sopia-core build
 ```
 
 プロジェクトルートに `.env` を作成して環境変数を設定してください（後述）。
@@ -91,6 +97,8 @@ pnpm tsx src/scripts/list-followings.ts
 ## よくある問題
 
 - `pnpm install` で `@sopia-bot/core` が見つからない
-  - `package.json` が `file:../spoon/packages/core` を参照しているため、想定のディレクトリ配置になっているか確認してください。
+  - `package.json` が `file:./sopia-core` を参照しているため、`sopia-core/` が存在するか確認してください。
+- `Cannot find module '@sopia-bot/core'` / `dist/index.cjs` が無い等で起動できない
+  - `sopia-core` のビルドが未実施の可能性があります: `pnpm -C sopia-core install && pnpm -C sopia-core build`
 - `/join` が「配信がない / Spoonクライアントが準備できていない」
   - 配信検知（`DJ_ID`）とトークン（`ACCESS_TOKEN`/`REFRESH_TOKEN`）の設定を確認してください。
