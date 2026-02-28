@@ -90,7 +90,7 @@ async function detectLoop(client: SpoonV2) {
 export async function main() {
   try {
     const client = await initSpoon();
-    notifyHandler(`[テスト]🚀 **kametti 監視システム起動**\n対象: ${CONFIG.DJ_ID}`);
+    notifyHandler(`🚀 **kametti 監視システム起動**\n対象: ${CONFIG.DJ_ID}`);
     setInterval(() => detectLoop(client), CONFIG.CHECK_INTERVAL_MS);
     await detectLoop(client);
   } catch (e: any) {

@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Events, ChatInputCommandInteraction, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageReaction, EmbedBuilder } from "discord.js";
+import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Events, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageReaction, EmbedBuilder, MessageFlags } from "discord.js";
 import { spoonClient, pendingLiveId, setNotifyHandler, main as startApp } from "../app";
 import { EventName } from "../spoon/events";
 import kuromoji from "kuromoji";
@@ -200,14 +200,16 @@ function setupLiveListeners(live: any) {
       await sendDiscordMessage(`💬 **${nickname}** :\n ${message}`, CHAT_CHANNEL_ID);
 
       // B. 特定ユーザー（または全員）のダジャレ判定
-      if (true || TARGET_USER_IDS.includes(userId)) {
+      if (TARGET_USER_IDS.includes(userId)) {
         const checker = new Shareka(message, 2);
         if (checker.dajarewake()) {
+          const profileIcon = gen?.profile_url || gen?.profileUrl || "";
           const dajareEmbed = new EmbedBuilder()
             .setColor(0x00ae86) // エメラルドグリーン
-            .setAuthor({ name: "🤣 ダジャレ候補" }) // 小さなラベルとして上部に
-            .setTitle(message) // 🌟 ここが一番大きく太字になります
-            .addFields({ name: "👤 投稿者", value: `${nickname}`, inline: true }, { name: "📊 状況", value: "投票受付中", inline: true })
+            .setAuthor({ name: `${nickname}のダジャレ候補` })
+            .setTitle(message)
+            .setThumbnail(profileIcon)
+            .addFields({ name: "📊 状況", value: "投票受付中", inline: true })
             .setTimestamp();
 
           const dajareMsg = await sendDiscordMessage(dajareEmbed, DAJARE_CHANNEL_ID);
@@ -225,14 +227,15 @@ function setupLiveListeners(live: any) {
 
             collector.on("collect", async (reaction: MessageReaction) => {
               const count: number = reaction.count - 1; // Bot自身の分を除く
-              const threshold: number = 1; // 判定基準（票数）
+              const threshold: number = Number(process.env.VOTE_THRESHOLD); // 判定基準（票数）
 
               if (reaction.emoji.name === "⭕" && count >= threshold) {
                 const approvedEmbed = new EmbedBuilder()
                   .setColor(0xffd700) // ゴールド
                   .setAuthor({ name: "🏆 公認ダジャレ！" })
-                  .setTitle(message) // 🌟 決定後も大きく表示
-                  .addFields({ name: "👤 投稿者", value: `${nickname}`, inline: true }, { name: "✅ 判定", value: "コミュニティ公認", inline: true })
+                  .setTitle(message)
+                  .addFields({ name: "投稿者", value: `${nickname}`, inline: true })
+                  .setThumbnail(profileIcon)
                   .setFooter({ text: "kametti Dajare System" })
                   .setTimestamp();
 
@@ -264,7 +267,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // 1. スラッシュコマンドの処理
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === "join") {
-        if (!pendingLiveId || !spoonClient) return interaction.reply({ content: "❌ 配信がありません。", ephemeral: true });
+        if (!pendingLiveId || !spoonClient) return interaction.reply({ content: "❌ 配信がありません。", flags: [MessageFlags.Ephemeral] });
         await interaction.deferReply();
         setupLiveListeners(spoonClient.live);
         await spoonClient.live.join(pendingLiveId);
@@ -290,9 +293,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // --- 配信に参加ボタン ---
       if (interaction.customId.startsWith("join_live_")) {
         const liveId = parseInt(interaction.customId.split("_")[2]);
-        if (!spoonClient) return interaction.reply({ content: "❌ ボットの準備ができていません。", ephemeral: true });
+        if (!spoonClient) return interaction.reply({ content: "❌ ボットの準備ができていません。", flags: [MessageFlags.Ephemeral] });
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
         try {
           setupLiveListeners(spoonClient.live);
@@ -310,7 +313,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // --- 配信から退室ボタン ---
       if (interaction.customId === "leave_live_btn") {
         if (!spoonClient || !spoonClient.live) {
-          return interaction.reply({ content: "⚠️ すでに退室しているか、準備ができていません。", ephemeral: true });
+          return interaction.reply({ content: "⚠️ すでに退室しているか、準備ができていません。", flags: [MessageFlags.Ephemeral] });
         }
 
         // ✅ deferReply ではなく deferUpdate を使う
@@ -334,7 +337,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           // すでに deferUpdate しているので、エラーも editReply で送る
           await interaction.followUp({
             content: `⚠️ 退室処理中にエラーが発生しました: ${e.message}`,
-            ephemeral: true,
+            flags: [MessageFlags.Ephemeral],
           });
         }
       }
