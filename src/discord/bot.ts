@@ -158,6 +158,32 @@ const sendDiscordMessage = async (content: string | EmbedBuilder, channelId = MA
   return null;
 };
 
+const extractLiveIdFromUrl = (raw: string): number | null => {
+  const text = raw.trim();
+  if (!text) return null;
+
+  // 入力が数値のみならそのままLiveIDとして扱う
+  if (/^\d+$/.test(text)) {
+    const asNumber = Number(text);
+    return Number.isSafeInteger(asNumber) && asNumber > 0 ? asNumber : null;
+  }
+
+  // URLから末尾の数値パスや liveId クエリを抽出
+  const liveIdQuery = text.match(/[?&]live(?:_|)id=(\d+)/i);
+  if (liveIdQuery?.[1]) {
+    const id = Number(liveIdQuery[1]);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  }
+
+  const trailingPathId = text.match(/\/(\d+)(?:[/?#]|$)/);
+  if (trailingPathId?.[1]) {
+    const id = Number(trailingPathId[1]);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  }
+
+  return null;
+};
+
 setNotifyHandler((message, liveId) => {
   void sendDiscordMessage(message, MAIN_CHANNEL_ID, liveId);
 });
@@ -166,7 +192,13 @@ setNotifyHandler((message, liveId) => {
 async function registerCommands() {
   const appId = process.env.DISCORD_APP_ID!;
   const guildId = process.env.DISCORD_GUILD_ID!;
-  const commands = [new SlashCommandBuilder().setName("join").setDescription("検知中のライブに参加"), new SlashCommandBuilder().setName("leave").setDescription("退室")].map((c) => c.toJSON());
+  const commands = [
+    new SlashCommandBuilder()
+      .setName("join")
+      .setDescription("検知中のライブに参加")
+      .addStringOption((option) => option.setName("url").setDescription("配信URLまたはLiveIDを指定して参加（任意）").setRequired(false)),
+    new SlashCommandBuilder().setName("leave").setDescription("退室"),
+  ].map((c) => c.toJSON());
 
   const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_BOT_TOKEN!);
   await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: commands });
@@ -267,14 +299,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // 1. スラッシュコマンドの処理
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === "join") {
-        if (!pendingLiveId || !spoonClient) return interaction.reply({ content: "❌ 配信がありません。", flags: [MessageFlags.Ephemeral] });
+        if (!spoonClient) return interaction.reply({ content: "❌ ボットの準備ができていません。", flags: [MessageFlags.Ephemeral] });
+
+        const inputUrl = interaction.options.getString("url");
+        const requestedLiveId = inputUrl ? extractLiveIdFromUrl(inputUrl) : null;
+        const targetLiveId = requestedLiveId ?? pendingLiveId;
+
+        if (!targetLiveId) {
+          return interaction.reply({
+            content: inputUrl ? "❌ URLからLiveIDを抽出できませんでした。例: `/join url:https://.../live/123456`" : "❌ 配信がありません。`/join url:<配信URL>` で直接指定できます。",
+            flags: [MessageFlags.Ephemeral],
+          });
+        }
+
         await interaction.deferReply();
         setupLiveListeners(spoonClient.live);
-        await spoonClient.live.join(pendingLiveId);
+        await spoonClient.live.join(targetLiveId);
 
         // ✅ 修正：退室ボタンを添えて返信する
         await interaction.editReply({
-          content: `✅ LiveID: ${pendingLiveId} に参加しました！`,
+          content: `✅ LiveID: ${targetLiveId} に参加しました！`,
           components: [createLeaveButtonRow()],
         });
       }

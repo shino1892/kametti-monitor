@@ -64,6 +64,7 @@ pnpm tsx src/discord/bot.ts
 ```
 
 - `/join` : 直近に検知した LiveId に参加してコメント受信を開始
+- `/join url:<配信URLまたはLiveID>` : URL（またはLiveID）を直接指定して参加
 - `/leave` : 退室
 
 ### 2) 監視だけをローカルで起動（コンソール通知）
