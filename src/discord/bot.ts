@@ -373,6 +373,7 @@ function setupLiveListeners(live: any) {
 　　　ｼ ｭ ﾜ ー ｯ ﾁ !!
 　　　　　 .゜`;
         await spoonClient.live.message(heartMessage);
+        console.error("ハートコメントを送信しました。");
       }
     }
 
