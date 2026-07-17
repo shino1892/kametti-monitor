@@ -9,49 +9,54 @@
  */
 export const Command = {
   /** チャンネル有効化（入室） */
-  ACTIVATE_CHANNEL: 'ACTIVATE_CHANNEL',
+  ACTIVATE_CHANNEL: "ACTIVATE_CHANNEL",
   /** チャンネル無効化（退室） */
-  DEACTIVATE_CHANNEL: 'DEACTIVATE_CHANNEL',
+  DEACTIVATE_CHANNEL: "DEACTIVATE_CHANNEL",
   /** メッセージ受信 */
-  MESSAGE: 'MESSAGE'
-} as const
+  MESSAGE: "MESSAGE",
+} as const;
 
-export type CommandType = (typeof Command)[keyof typeof Command]
+export type CommandType = (typeof Command)[keyof typeof Command];
 
 /**
  * 受信イベント名（payload.body 内の eventName）
  */
 export const EventName = {
   /** チャットメッセージ */
-  CHAT_MESSAGE: 'ChatMessage',
+  CHAT_MESSAGE: "ChatMessage",
   /** ユーザー入室 */
-  ROOM_JOIN: 'RoomJoin',
+  ROOM_JOIN: "RoomJoin",
   /** ユーザーのキック/ブロック */
-  ROOM_KICK: 'RoomKick',
+  ROOM_KICK: "RoomKick",
   /** 配信メタデータ更新 */
-  LIVE_META_UPDATE: 'LiveMetaUpdate',
+  LIVE_META_UPDATE: "LiveMetaUpdate",
   /** ステッカー支援 */
-  LIVE_DONATION: 'LiveDonation',
+  LIVE_DONATION: "LiveDonation",
   /** 無料いいね */
-  LIVE_FREE_LIKE: 'LiveFreeLike',
+  LIVE_FREE_LIKE: "LiveFreeLike",
   /** 有料いいね */
-  LIVE_PAID_LIKE: 'LivePaidLike',
+  LIVE_PAID_LIKE: "LivePaidLike",
   /** アイテム使用 */
-  LIVE_ITEM_USE: 'LiveItemUse',
+  LIVE_ITEM_USE: "LiveItemUse",
   /** ランキング変動 */
-  LIVE_RANK: 'LiveRank',
+  LIVE_RANK: "LiveRank",
+  /** 常連温度更新 */
+  LIVE_TEMP: "LiveFavoriteTemperature",
 
   // ラッキーボックス/クイズイベント
   /** ドネーショントレイ（ラッキーボックス/クイズ作成通知） */
-  DONATION_TRAY: 'DonationTray',
+  DONATION_TRAY: "DonationTray",
   /** ラッキーボックス受付（DJがラッキーボックスを開く） */
-  LUCKY_BOX_ACCEPT: 'LuckyBoxAccept',
+  LUCKY_BOX_ACCEPT: "LuckyBoxAccept",
   /** ラッキーボックス結果 */
-  LUCKY_BOX_RESULT: 'LuckyBoxResult',
+  LUCKY_BOX_RESULT: "LuckyBoxResult",
   /** クイズ受付（DJがクイズを開く） */
-  QUIZ_ACCEPT: 'QuizAccept',
+  QUIZ_ACCEPT: "QuizAccept",
   /** クイズ結果 */
-  QUIZ_RESULT: 'QuizResult'
-} as const
+  QUIZ_RESULT: "QuizResult",
+} as const;
 
-export type EventNameType = (typeof EventName)[keyof typeof EventName]
+export type EventNameType = (typeof EventName)[keyof typeof EventName];
+
+/** 配信終了 */
+export const ROOM_CLOSE_EVENT_NAME = "RoomClose";

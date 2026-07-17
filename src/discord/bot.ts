@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Events, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageReaction, EmbedBuilder, MessageFlags } from "discord.js";
 import { spoonClient, pendingLiveId, setNotifyHandler, main as startApp } from "../app";
-import { EventName } from "../spoon/events";
+import { EventName, ROOM_CLOSE_EVENT_NAME } from "../spoon/events";
 import kuromoji from "kuromoji";
 
 // --- 設定の読み込み ---
@@ -9,6 +9,22 @@ const TARGET_USER_IDS = (process.env.TARGET_IDS || "").split(",").map((id) => id
 const CHAT_CHANNEL_ID = process.env.DISCORD_CHAT_CHANNEL_ID;
 const MAIN_CHANNEL_ID = process.env.DISCORD_MAIN_CHANNEL_ID;
 const DAJARE_CHANNEL_ID = process.env.DISCORD_DAJARE_CHANNEL_ID;
+
+type HeartUserStat = {
+  userId: string;
+  nickname: string;
+  count: number;
+};
+
+type HeartTracker = {
+  liveId: number;
+  baselineTotal: number;
+  total: number;
+  users: Map<string, HeartUserStat>;
+  finalReported: boolean;
+};
+
+let heartTracker: HeartTracker | null = null;
 
 // --- ダジャレ判定・形態素解析の準備 (Shareka) ---
 let tokenizer: kuromoji.Tokenizer<kuromoji.IpadicFeatures> | null = null;
@@ -188,6 +204,90 @@ setNotifyHandler((message, liveId) => {
   void sendDiscordMessage(message, MAIN_CHANNEL_ID, liveId);
 });
 
+const upsertHeartUser = (userId: string, nickname: string, delta: number) => {
+  if (!heartTracker) return;
+
+  const current = heartTracker.users.get(userId) || { userId, nickname, count: 0 };
+  current.nickname = nickname || current.nickname || "不明";
+  current.count += delta;
+  heartTracker.users.set(userId, current);
+  heartTracker.total += delta;
+};
+
+const getHeartSummaryText = (limit = 10): string => {
+  if (!heartTracker) return "❤️ まだハート集計は開始されていません。";
+
+  const top = Array.from(heartTracker.users.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, Math.max(1, limit));
+
+  const lines = top.map((u, i) => `${i + 1}. ${u.nickname} (${u.userId}): ${u.count}`);
+  const delta = Math.max(0, heartTracker.total - heartTracker.baselineTotal);
+
+  return [`❤️ **ハート集計**`, `🆔 LiveID: ${heartTracker.liveId}`, `📌 参加時点の総ハート: ${heartTracker.baselineTotal}`, `➕ 参加後に増えたハート: ${delta}`, `📈 現在の推定総ハート: ${heartTracker.total}`, "", top.length ? "**ユーザー別 上位**" : "ユーザー別データがありません。", ...lines].join("\n");
+};
+
+const sendFinalHeartSummary = async (reason: "room-close" | "manual-leave") => {
+  if (!heartTracker) return;
+  if (heartTracker.finalReported) return;
+
+  const header = reason === "room-close" ? "🏁 配信終了を検知しました。最終ハート集計です。" : "👋 退出時点のハート集計です。";
+  await sendDiscordMessage(`${header}\n\n${getHeartSummaryText()}`, MAIN_CHANNEL_ID);
+  heartTracker.finalReported = true;
+};
+
+const resolveEventName = (eventNameOrEvent: any): string => {
+  if (typeof eventNameOrEvent === "string") return eventNameOrEvent;
+  return String(eventNameOrEvent?.eName || eventNameOrEvent?.eventName || "");
+};
+
+const initializeHeartTracker = async (liveId: number) => {
+  if (!spoonClient) return;
+
+  const users = new Map<string, HeartUserStat>();
+  let seededTotal = 0;
+  let next: string | undefined;
+
+  try {
+    do {
+      const likeRes: any = await spoonClient.api.live.getLikeRank(liveId, next);
+      const list = likeRes?.results || [];
+
+      for (const user of list) {
+        const userId = String(user?.id ?? "").trim();
+        if (!userId) continue;
+
+        const count = Number(user?.like_count ?? 0);
+        const safeCount = Number.isFinite(count) && count > 0 ? count : 0;
+        users.set(userId, {
+          userId,
+          nickname: user?.nickname || "不明",
+          count: safeCount,
+        });
+        seededTotal += safeCount;
+      }
+
+      next = likeRes?.next || undefined;
+    } while (next);
+  } catch (e: any) {
+    console.warn("⚠️ 初期ハート取得に失敗:", e?.message || e);
+  }
+
+  const currentLive: any = (spoonClient.live as any)?.currentLive;
+  const baselineFromLive = Number(currentLive?.like_count || currentLive?.likeCount || 0);
+  const baselineTotal = Number.isFinite(baselineFromLive) && baselineFromLive > 0 ? baselineFromLive : 0;
+
+  heartTracker = {
+    liveId,
+    baselineTotal,
+    total: Math.max(baselineTotal, seededTotal),
+    users,
+    finalReported: false,
+  };
+
+  await sendDiscordMessage([`❤️ ハート集計を開始しました（LiveID: ${liveId}）`, `参加時点の総ハート: ${heartTracker.baselineTotal}`, `参加時点で取得できたユーザー数: ${heartTracker.users.size}`].join("\n"), MAIN_CHANNEL_ID);
+};
+
 // --- スラッシュコマンド登録 ---
 async function registerCommands() {
   const appId = process.env.DISCORD_APP_ID!;
@@ -198,6 +298,7 @@ async function registerCommands() {
       .setDescription("検知中のライブに参加")
       .addStringOption((option) => option.setName("url").setDescription("配信URLまたはLiveIDを指定して参加（任意）").setRequired(false)),
     new SlashCommandBuilder().setName("leave").setDescription("退室"),
+    new SlashCommandBuilder().setName("hearts").setDescription("現在のハート集計（ユーザー別）を表示"),
   ].map((c) => c.toJSON());
 
   const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_BOT_TOKEN!);
@@ -215,11 +316,59 @@ const createLeaveButtonRow = () => {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId("leave_live_btn").setLabel("配信から退室する").setStyle(ButtonStyle.Danger).setEmoji("👋"));
 };
 
+// --- 関数の外側に配置する保管庫 ---
+let tempUserBuffer: string[] = [];
+let liveFlushTimer: NodeJS.Timeout | null = null;
+const BUFFER_DELAY_MS = 200; // 2秒間、他の同時受信を待つ
+
+// 溜まったユーザー名をまとめて配信内に送信する関数
+async function flushLiveUserBuffer() {
+  if (tempUserBuffer.length === 0) return;
+
+  // 重複したユーザー名を排除（同じ人が複数クライアントで同時に検知された場合のため）
+  const uniqueUsers = Array.from(new Set(tempUserBuffer));
+  tempUserBuffer = [];
+  liveFlushTimer = null;
+
+  if (spoonClient && spoonClient.live) {
+    try {
+      // 例: 「ユーザーAさん、ユーザーBさん が入室しました！」
+      const joinedNames = uniqueUsers.join("さん、");
+      const combinedMessage = `${joinedNames}さん\nの温度が上昇しました！`;
+
+      await spoonClient.live.message(combinedMessage);
+      console.log(`💬 配信内にまとめメッセージを送信しました: ${combinedMessage}`);
+    } catch (e: any) {
+      console.error("❌ 配信内へのまとめチャット送信失敗:", e);
+    }
+  }
+}
+
 // --- ライブリスナーの共通化 (二重登録防止用) ---
 function setupLiveListeners(live: any) {
   live.removeAllListeners("event:all");
-  live.on("event:all", async (eventName: string, payload: any) => {
-    if (eventName === EventName.CHAT_MESSAGE) {
+  live.on("event:all", async (eventNameOrEvent: any, payload: any) => {
+    const eName = resolveEventName(eventNameOrEvent);
+
+    if (eName === ROOM_CLOSE_EVENT_NAME) {
+      await sendFinalHeartSummary("room-close");
+      heartTracker = null;
+      return;
+    }
+
+    if (eName === EventName.LIVE_FREE_LIKE || eName === EventName.LIVE_PAID_LIKE) {
+      const userId = String(payload?.userId ?? payload?.generator?.id ?? "").trim();
+      const nickname = payload?.nickname || payload?.generator?.nickname || "不明";
+      const rawDelta = eName === EventName.LIVE_FREE_LIKE ? payload?.count : payload?.amount;
+      const delta = Number(rawDelta ?? 1);
+      const safeDelta = Number.isFinite(delta) && delta > 0 ? delta : 1;
+
+      if (heartTracker && userId) {
+        upsertHeartUser(userId, nickname, safeDelta);
+      }
+    }
+
+    if (eName === EventName.CHAT_MESSAGE) {
       const gen = payload.generator || payload.author || payload.user || payload;
       const userId = gen?.id?.toString();
       const nickname = gen?.nickname || "不明";
@@ -290,6 +439,27 @@ function setupLiveListeners(live: any) {
         }
       }
     }
+
+    if(eName === EventName.LIVE_TEMP) {
+      const gen = payload.generator || payload.author || payload.user || payload;
+      const userId = gen?.id?.toString();
+      const nickname = gen?.nickname || "???";
+
+      const myId = (spoonClient as any).logonUser?.id?.toString();
+      if (userId === myId) return;
+
+      tempUserBuffer.push(nickname);
+
+      // すでにタイマーが動いていたらクリア（最後の受信から2秒後に送信するため）
+      if (liveFlushTimer) {
+        clearTimeout(liveFlushTimer);
+      }
+
+      // タイマーを新しくセット（デバウンス処理）
+      liveFlushTimer = setTimeout(() => {
+        flushLiveUserBuffer().catch(err => console.error("Live buffer flush error:", err));
+      }, BUFFER_DELAY_MS);
+    }
   });
 }
 
@@ -315,6 +485,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.deferReply();
         setupLiveListeners(spoonClient.live);
         await spoonClient.live.join(targetLiveId);
+        await initializeHeartTracker(targetLiveId);
 
         // ✅ 修正：退室ボタンを添えて返信する
         await interaction.editReply({
@@ -325,9 +496,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (interaction.commandName === "leave") {
         if (spoonClient) {
+          await sendFinalHeartSummary("manual-leave");
           await spoonClient.live.close();
+          heartTracker = null;
           await interaction.reply({ content: "👋 退室しました", components: [] }); // ボタンを消去
         }
+      }
+
+      if (interaction.commandName === "hearts") {
+        return interaction.reply({
+          content: getHeartSummaryText(),
+          flags: [MessageFlags.Ephemeral],
+        });
       }
       return;
     }
@@ -344,6 +524,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         try {
           setupLiveListeners(spoonClient.live);
           await spoonClient.live.join(liveId);
+          await initializeHeartTracker(liveId);
           // ✅ 修正：退室ボタンを添えて返信する
           await interaction.editReply({
             content: `✅ LiveID: ${liveId} に参加しました！`,
@@ -366,7 +547,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         try {
           // Spoonの退室処理を実行
+          await sendFinalHeartSummary("manual-leave");
           await spoonClient.live.close();
+          heartTracker = null;
 
           // ✅ editReply で元のメッセージを書き換える
           // content を上書きし、components を空にすることでボタンを消去します
