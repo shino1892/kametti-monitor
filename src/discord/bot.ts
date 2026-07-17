@@ -366,6 +366,14 @@ function setupLiveListeners(live: any) {
       if (heartTracker && userId) {
         upsertHeartUser(userId, nickname, safeDelta);
       }
+
+      if (spoonClient && spoonClient.live) {
+        const heartMessage = `𓂃 ❥ 𓊝𓂃𓂃𓂃𓂃𓂃𓂃
+　　　　　　 𓈒𓏸
+　　　ｼ ｭ ﾜ ー ｯ ﾁ !!
+　　　　　 .゜`;
+        await spoonClient.live.message(heartMessage);
+      }
     }
 
     if (eName === EventName.CHAT_MESSAGE) {
@@ -440,7 +448,9 @@ function setupLiveListeners(live: any) {
       }
     }
 
-    if(eName === EventName.LIVE_TEMP) {
+    //マネージャーは不可
+    if (eName === EventName.LIVE_TEMP) {
+      console.error("");
       const gen = payload.generator || payload.author || payload.user || payload;
       const userId = gen?.id?.toString();
       const nickname = gen?.nickname || "???";
@@ -457,7 +467,7 @@ function setupLiveListeners(live: any) {
 
       // タイマーを新しくセット（デバウンス処理）
       liveFlushTimer = setTimeout(() => {
-        flushLiveUserBuffer().catch(err => console.error("Live buffer flush error:", err));
+        flushLiveUserBuffer().catch((err) => console.error("Live buffer flush error:", err));
       }, BUFFER_DELAY_MS);
     }
   });
